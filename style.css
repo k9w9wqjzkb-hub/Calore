@@ -9,7 +9,14 @@ body {
   background: #faf7f5;
   color: #1c1c1e;
 }
+html, body {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
 
+input, select, textarea {
+  font-size: 16px;
+}
 /* ================= TOPBAR FISSA ================= */
 .topbar {
   position: fixed;
