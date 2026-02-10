@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<!-- 🔑 QUESTO È FONDAMENTALE -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- <meta name="viewport" content="width=device-width, initial-scale=1.0">>-->
+<title>Grafici Consumi</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+  header.topbar { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.1);}
+  header .logo { font-size: 24px; }
+  main.container { padding: 16px; }
+  h2 { margin-top:0; }
+
+  .filter { margin: 40px 0 12px 0; }
+  .filter select { width: 100%; padding: 8px 10px; border-radius: 10px; border:1px solid #ccc; font-size:14px; }
+
+  .chart-card { background:#fff; padding:16px; border-radius:12px; margin-bottom:16px; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+  canvas { width:100% !important; height:300px !important; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="logo">🔥</div>
+    <span class="app-name">Calore</span>
+  </div>
+  <div class="topbar-right">
+    <button class="icon-btn" onclick="location.href='index.html'">🏠</button>
+    <button class="icon-btn" onclick="location.href='caloriferi.html'">♨️</button>
+    <button class="icon-btn" onclick="location.href='storico.html'">🕘</button>
+    <button class="icon-btn active" onclick="location.href='grafici.html'">📊</button>
+  </div>
+</header>
+
+<main class="container">
+  <h2>Grafici Consumi</h2>
+
+  <div class="filter">
+    <label for="filtroAnno">Seleziona anno:</label>
+    <select id="filtroAnno"></select>
+  </div>
+
+  <div class="chart-card">
+    <h3>Consumi per Anno Termico (ultimi 5 anni)</h3>
+    <canvas id="chartAnno"></canvas>
+  </div>
+
+  <div class="chart-card">
+    <h3>Consumi per Stanza (Anno selezionato)</h3>
+    <canvas id="chartStanza"></canvas>
+  </div>
+</main>
+
+<script src="app.js"></script>
+<script>
+const ctxAnno = document.getElementById("chartAnno").getContext("2d");
+const ctxStanza = document.getElementById("chartStanza").getContext("2d");
+
+let chartAnno, chartStanza;
+
+function getDB() {
+  return JSON.parse(localStorage.getItem("calore-db")) || { caloriferi: [], letture: [] };
+}
+
+// ================= ANNO TERMICO =================
+function getAnnoTermico(data) {
+  const d = new Date(data);
+  const y = d.getFullYear();
+  return d.getMonth() >= 9 ? `${y}-${y + 1}` : `${y - 1}-${y}`;
+}
+
+// ================= CONSUMI REALI =================
+function calcolaConsumiPerCalorifero(caloriferoId) {
+  const db = getDB();
+  const letture = db.letture
+    .filter(l => l.caloriferoId === caloriferoId)
+    .sort((a, b) => new Date(a.data) - new Date(b.data));
+
+  const consumi = [];
+
+  letture.forEach((l, i) => {
+    let consumo = i === 0
+      ? Number(l.valore)
+      : Number(l.valore) - Number(letture[i - 1].valore);
+
+    if (consumo < 0) consumo = 0;
+
+    consumi.push({
+      data: l.data,
+      consumo,
+      stanza: l.stanza
+    });
+  });
+
+  return consumi;
+}
+
+// ================= ULTIMI 5 ANNI =================
+function ultimi5AnniTermici() {
+  const db = getDB();
+  const anni = [...new Set(db.letture.map(l => getAnnoTermico(l.data)))].sort();
+  if (!anni.length) return [];
+  const max = Number(anni[anni.length - 1].split("-")[0]);
+  return Array.from({ length: 5 }, (_, i) => `${max - 4 + i}-${max - 3 + i}`);
+}
+
+// ================= FILTRO =================
+function popolaFiltroAnno() {
+  const anni = ultimi5AnniTermici();
+  const select = document.getElementById("filtroAnno");
+  select.innerHTML = "";
+  anni.forEach(a => {
+    const opt = document.createElement("option");
+    opt.value = a;
+    opt.textContent = a;
+    select.appendChild(opt);
+  });
+  if (anni.length) select.value = anni[anni.length - 1];
+}
+
+// ================= GRAFICI =================
+function aggiornaGrafici() {
+  const db = getDB();
+  const annoSelezionato = document.getElementById("filtroAnno").value;
+  if (!annoSelezionato) return;
+
+  /* --------- GRAFICO 1: CONSUMI PER ANNO --------- */
+  const anni = ultimi5AnniTermici();
+  const totaliPerAnno = anni.map(a => {
+    let totale = 0;
+    db.caloriferi.forEach(c => {
+      calcolaConsumiPerCalorifero(c.id).forEach(r => {
+        if (getAnnoTermico(r.data) === a) totale += r.consumo;
+      });
+    });
+    return totale;
+  });
+
+  if (chartAnno) chartAnno.destroy();
+  chartAnno = new Chart(ctxAnno, {
+    type: "bar",
+    data: {
+      labels: anni,
+      datasets: [{
+        data: totaliPerAnno,
+        backgroundColor: "#ff7043"
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+
+  /* --------- GRAFICO 2: CONSUMI PER STANZA --------- */
+  const consumiPerStanza = {};
+
+  db.caloriferi.forEach(c => {
+    calcolaConsumiPerCalorifero(c.id).forEach(r => {
+      if (getAnnoTermico(r.data) !== annoSelezionato) return;
+      consumiPerStanza[r.stanza] =
+        (consumiPerStanza[r.stanza] || 0) + r.consumo;
+    });
+  });
+
+  const labels = Object.keys(consumiPerStanza);
+  const dati = Object.values(consumiPerStanza);
+
+  if (chartStanza) chartStanza.destroy();
+  chartStanza = new Chart(ctxStanza, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: dati,
+        backgroundColor: "#42a5f5"
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
+
+// ================= INIT =================
+document.addEventListener("DOMContentLoaded", () => {
+  popolaFiltroAnno();
+  document.getElementById("filtroAnno").addEventListener("change", aggiornaGrafici);
+  aggiornaGrafici();
+});
+</script>
+
+</body>
+</html>
